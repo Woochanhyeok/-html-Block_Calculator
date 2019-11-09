@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ko">
+<head>
+	<meta charset="utf-8" />
+	<title>Direct Manipulation of Math Symbols</title>
+</head>
+
+<body>
+    <script src='https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js' type='text/javascript'></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/2.4.6/fabric.min.js" type="text/javascript"></script>
+    <script src="./VisualMath/math.min.js" type="text/javascript"></script>
+		<p>----실행 : Enter---- 분해 : Alt ---- 복제 : Ctrl ---- 소멸 : Delete----</p>
+    <canvas id="c" width="1024" height="768">
+        Canvas not supported
+    </canvas>
+
+    <script>
+        const parser = math.parser();
+
+        const SYMBOL_WIDTH = 50;
+        const SYMBOL_HEIGHT = 50;
+
+        let MathApp = {};
+
+
+        MathApp.symbol_paths = {
+                '+':    "add",
+                '-':    "sub",
+                '*':    "mul",
+                '/':    "div",
+                '(':    "parenthesis_open",
+                ')':    "parenthesis_close",
+                '[':    "squarebracket_open",
+                ']':    "squarebracket_close",
+                '{':    "curlybrace_open",
+                '}':    "curlybrace_close",
+                '.':    "period",
+                ',':    "comma",
+                ':':    "colon",
+                ';':    "semicolon",
+                '=':    "equal",
+                '>':    "more",
+                '<':    "less",
+                '!':    "exclamation"
+        };
+
+        MathApp.blocks = [];
+        MathApp.selected_block = null;
+
+        MathApp.is_mouse_dragging = false;
+        MathApp.mouse_drag_prev = {x:0, y:0};
+
+
+				MathApp.block_types = {
+            UNDEFINED:  "undefind",
+            SYMBOL:     "symbol",
+        };
+
+        MathApp.initialize = function() {
+            for(let i=0; i <= 9; i++)
+            {
+                let key = i.toString();
+                let value = key;
+                this.symbol_paths[key] = value;
+            }
+
+            for(let c="a".charCodeAt(0); c <= "z".charCodeAt(0); c++)
+            {
+                let key = String.fromCharCode(c);
+                let value = key;
+                this.symbol_paths[key] = value;
+            }
+
+            this.canvas = new fabric.Canvas("c", {
+                backgroundColor: "#eee",
+                hoverCursor: "default",
+                selection: false
+            });
+
+            //
+						$(document).keydown(function(event) {
+							let key = null;
+							if(event.keyCode==13)										//실행
+							{
+								key="Enter";
+							}
+							else if(event.altKey) 									//분해
+							{
+								key="Alt";
+							}
+							else if(event.ctrlKey) 									//복제
+							{
+								key="Ctrl";
+							}
+							else if(event.keyCode==46)							//소멸
+							{
+								key="Delete";
+							}
+							MathApp.handleKeyDown(key);
+						});
+            $(document).keypress(function(event) {
+                let key = String.fromCharCode(event.which);
+                MathApp.handleKeyPress(key);
+            });
+            $(document).mousedown(function(event) {
+                let p = {x: event.pageX, y: event.pageY};
+                MathApp.handleMouseDown(p);
+            });
+            $(document).mouseup(function(event) {
+                let p = {x: event.pageX, y: event.pageY};
+                MathApp.handleMouseUp(p);
+            });
+            $(document).mousemove(function(event) {
+                let p = {x: event.pageX, y: event.pageY};
+                MathApp.handleMouseMove(p);
+            });
+        }
+
+				MathApp.handleKeyDown = function(key){
+					if(key=="Enter")										//실행
+					{
+						this.selected_block.execute();
+					}
+					else if(key=="Alt")									//분해
+					{
+						this.selected_block.disassemble();
+					}
+					else if(key=="Ctrl")								//복제
+					{
+						this.selected_block.duplicate();
+					}
+					else if(key=="Delete")							//소멸
+					{
+						this.selected_block.destroy();
+
+					}
+				}
+
+        MathApp.handleKeyPress = function(key) {
+            if (key in this.symbol_paths)
+            {
+                let size = {
+                    width : SYMBOL_WIDTH,
+                    height : SYMBOL_HEIGHT
+                };
+                let position = {
+                    x : Math.random() * (this.canvas.width-size.width) + size.width/2,
+                    y : Math.random() * (this.canvas.height-size.height) + size.height/2
+                };
+                let new_symbol = new MathApp.Symbol(position, size, key);
+            }
+        }
+
+        MathApp.handleMouseDown = function(window_p) {
+            if(MathApp.isInCanvas(window_p))
+            {
+                let canvas_p = MathApp.transformToCanvasCoords(window_p);
+
+                if( MathApp.selected_block != null )
+                {
+									let arr = MathApp.groupToArray(this.selected_block);
+										for(let i=0; i < arr.length; i++)
+										{
+												arr[i].onDeselected();
+										}
+                    MathApp.selected_block = null;
+                }
+
+                let block = MathApp.findBlockOn(canvas_p);
+                if(block != null)
+                {
+                    MathApp.selected_block = block;
+										let arr = MathApp.groupToArray(this.selected_block);
+										for(let i=0; i < arr.length; i++)
+										{
+												arr[i].onSelected();
+										}
+                }
+
+                MathApp.is_mouse_dragging = true;
+                MathApp.mouse_drag_prev = canvas_p;
+
+                MathApp.canvas.requestRenderAll();
+            }
+            else
+            {
+                MathApp.is_mouse_dragging = false;
+                MathApp.mouse_drag_prev = {x:0, y:0};
+            }
+        }
+
+        MathApp.handleMouseMove = function(window_p) {
+            if(MathApp.is_mouse_dragging)
+            {
+                let canvas_p = MathApp.transformToCanvasCoords(window_p);
+
+								if(MathApp.selected_block != null)
+								{
+										let arr = MathApp.groupToArray(MathApp.selected_block);
+										for(let i=0; i < arr.length; i++)
+										{
+											let tx = canvas_p.x - MathApp.mouse_drag_prev.x;
+		                  let ty = canvas_p.y - MathApp.mouse_drag_prev.y;
+		                  arr[i].translate({x: tx, y: ty});
+											MathApp.canvas.requestRenderAll();
+										}
+								}
+                MathApp.mouse_drag_prev = canvas_p;
+
+                MathApp.canvas.requestRenderAll();
+            }
+        }
+
+				MathApp.isGroup = function(block){																			//block을 인자로 받아서 그 block이 그룹 상태인지 판별
+					let i = 0;
+					let count = 0;
+					while (i < this.blocks.length)
+					{
+						if (this.blocks[i].head == block.head)
+							count++;
+						i++;
+					}
+					if (count>1)
+						return true;
+					else
+						return false;
+				}
+
+				MathApp.groupToArray = function(block){
+					let arr = new Array();
+					let m_block = null;
+
+					m_block = MathApp.findHead(block);
+					arr.push(m_block);
+
+					while(m_block.tail != null)
+					{
+						let i = 0;
+						while (i < this.blocks.length)
+						{
+							if (m_block.tail == this.blocks[i].num)
+							{
+								m_block = this.blocks[i];
+								arr.push(m_block);
+							}
+							i++;
+						}
+					}
+					return arr;
+				}
+
+
+				MathApp.findHead = function(block){																			//block을 인자로 받아서 그 block이 속한 그룹의 tail 블록 반환
+					let i = 0;
+					head_block = block;
+					while (i < this.blocks.length)
+					{
+						if(this.blocks[i].head==block.head && this.blocks[i].num == block.head)
+							head_block=this.blocks[i];
+						i++;
+					}
+					return head_block;
+				}
+
+
+				MathApp.findTail = function(block){																			//block을 인자로 받아서 그 block이 속한 그룹의 tail 블록 반환
+					let i = 0;
+					tail_block = block;
+					while (i < this.blocks.length)
+					{
+						if(this.blocks[i].head==block.head && this.blocks[i].tail == null)
+							tail_block=this.blocks[i];
+						i++;
+					}
+					return tail_block;
+				}
+
+
+        MathApp.handleMouseUp = function(window_p) {
+            if(MathApp.is_mouse_dragging)
+            {
+                let canvas_p = MathApp.transformToCanvasCoords(window_p);
+								let index = MathApp.blocks.indexOf(this.selected_block);
+								let overlapped_block = null;
+								let tail_block = null;
+								let i=0;
+								while(i < this.blocks.length)
+								{
+									let block = this.blocks[i];
+									i++;
+									if(this.selected_block.position.x + SYMBOL_WIDTH > block.position.x &&				//selected_block이 block과 겹치면
+											this.selected_block.position.x < block.position.x + block.size.width &&
+											this.selected_block.position.y + SYMBOL_HEIGHT > block.position.y &&
+											this.selected_block.position.y < block.position.y + block.size.height &&
+											i-1!=index)
+											{
+												tail_block = MathApp.findTail(block);																	//tail_block에 block의 tail_block을 넣음
+												if(MathApp.isGroup(this.selected_block))
+												{
+													let arr = MathApp.groupToArray(this.selected_block);
+													tail_block.tail = arr[0].num;
+													arr[0].head = block.head;
+													arr[0].moveTo({x: tail_block.position.x + tail_block.size.width, y: tail_block.position.y});
+													for (let i = 1; i < arr.length; i++)
+													{
+														arr[i].head = block.head;
+														arr[i].moveTo({x: arr[i-1].position.x + arr[i-1].size.width, y: arr[i-1].position.y});
+													}
+												}
+												else
+												{
+													this.selected_block.head = block.head;																//head 일치시키는 작업
+													tail_block.tail = this.selected_block.num;														//tail_block의 tail에 selected_block의 num을 넣어줌
+													MathApp.selected_block.moveTo({x: tail_block.position.x + tail_block.size.width, y: tail_block.position.y});
+												}
+
+												let present_arr = MathApp.groupToArray(block).concat(MathApp.groupToArray(this.selected_block));
+												for(let i = 0 ; i<present_arr.length; i++)
+												{
+													present_arr[i].onSelected();
+												}
+
+												break;
+											}
+								}
+
+                MathApp.is_mouse_dragging = false;
+                MathApp.mouse_drag_prev = {x:0, y:0};
+
+                MathApp.canvas.requestRenderAll();
+            }
+        }
+
+        MathApp.transformToCanvasCoords = function(window_p) {
+            let rect = MathApp.canvas.getElement().getBoundingClientRect();
+            let canvas_p = {
+                x : window_p.x - rect.left,
+                y : window_p.y - rect.top
+            };
+            return canvas_p;
+        }
+
+        MathApp.isInCanvas = function(window_p) {
+            let rect = MathApp.canvas.getElement().getBoundingClientRect();
+            if( window_p.x >= rect.left &&
+                window_p.x < rect.left + rect.width &&
+                window_p.y >= rect.top &&
+                window_p.y < rect.top + rect.height )
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        MathApp.findBlockOn = function(canvas_p) {
+            let x = canvas_p.x;
+            let y = canvas_p.y;
+
+            for(let i=0; i < this.blocks.length; i++)
+            {
+                let block = this.blocks[i];
+
+                if( x >= block.position.x - block.size.width/2 &&
+                    x <= block.position.x + block.size.width/2 &&
+                    y >= block.position.y - block.size.height/2 &&
+                    y <= block.position.y + block.size.height/2 )
+                {
+                    return block;
+                }
+            }
+            return null;
+        }
+
+        //
+        MathApp.Block = function(position, size) {
+            this.position = position;
+            this.size = size;
+            this.type = MathApp.block_types.UNDEFINED;
+
+            this.visual_items = [];
+
+            MathApp.blocks.push(this);
+        }
+
+        MathApp.Block.prototype.onDeselected = function() {
+            this.visual_items[this.visual_items.length-1].set({
+                stroke: "rgba(0,0,255,1)"
+            });
+        }
+
+        MathApp.Block.prototype.onSelected = function() {
+            this.visual_items[this.visual_items.length-1].set({
+                stroke: "rgba(255,0,0,1)"
+            });
+
+            this.visual_items.forEach(item => {
+                MathApp.canvas.bringToFront(item);
+            });
+        }
+
+        MathApp.Block.prototype.moveTo = function(p) {
+            let tx = p.x - this.position.x;
+            let ty = p.y - this.position.y;
+
+            this.translate({x: tx, y: ty});
+        }
+
+        MathApp.Block.prototype.translate = function(v) {
+            this.position.x += v.x;
+            this.position.y += v.y;
+
+            this.visual_items.forEach(item => {
+                item.left += v.x;
+                item.top += v.y;
+            });
+        }
+
+        MathApp.Block.prototype.destroy = function() {								//삭제 함수
+            if(this == MathApp.selected_block)
+            {
+							let arr = MathApp.groupToArray(MathApp.selected_block);
+							for(let i = 0; i<arr.length; i++)
+							{
+                MathApp.selected_block = null;
+                arr[i].onDeselected();
+
+								arr[i].visual_items.forEach(item => {
+										MathApp.canvas.remove(item);
+								});
+								arr[i].visual_items = [];
+
+								let index = MathApp.blocks.indexOf(arr[i]);
+								if(index > -1)
+								{
+										MathApp.blocks.splice(index, 1);
+								}
+							}
+            }
+        }
+				MathApp.Block.prototype.execute = function() {								//실행 함수
+						if(this == MathApp.selected_block)
+						{
+							let arr = MathApp.groupToArray(MathApp.selected_block);
+							let string='';
+							for(let i = 0; i<arr.length; i++)
+							{
+								string += arr[i].name;
+							}
+							var result = parser.eval(string).toString();
+							if(result.indexOf('function')!=-1)
+							{
+								result = "function".split("");
+							}
+							else {
+								result = result.split("");
+							}
+
+							for(let i = 0; i<result.length; i++)
+							{
+								let size = {
+										width : SYMBOL_WIDTH,
+										height : SYMBOL_HEIGHT
+								};
+								let position = {
+										x : MathApp.selected_block.position.x + i * 50,
+										y : MathApp.selected_block.position.y + 100
+								};
+								let new_symbol = new MathApp.Symbol(position, size, result[i]);
+							}
+							let number = MathApp.blocks.length-result.length;
+
+							for(let i = 0; i<result.length; i++)
+							{
+								MathApp.blocks[number+i].head = MathApp.blocks[number].num;
+								if(i==result.length-1)
+								{
+									MathApp.blocks[number+i].tail = null;
+								}
+								else {
+									MathApp.blocks[number+i].tail = MathApp.blocks[number+i+1].num;
+								}
+							}
+						}
+				}
+
+				MathApp.Block.prototype.disassemble = function() {								//분해 함수
+						if(this == MathApp.selected_block)
+						{
+							let arr = MathApp.groupToArray(this);
+							for(let i = 0; i<arr.length; i++)
+							{
+								arr[i].onDeselected();
+								arr[i].head=arr[i].num;
+								arr[i].tail=null;
+							}
+						}
+						MathApp.canvas.requestRenderAll();
+				}
+				MathApp.Block.prototype.duplicate = function() {								//복제 함수
+						if(this == MathApp.selected_block)
+						{
+							let arr = MathApp.groupToArray(MathApp.selected_block);
+							let copied_arr = arr.slice();
+							for(let i = 0; i<arr.length; i++)
+							{
+								let size = {
+                    width : SYMBOL_WIDTH,
+                    height : SYMBOL_HEIGHT
+                };
+                let position = {
+                    x : MathApp.selected_block.position.x + i * 50,
+                    y : MathApp.selected_block.position.y + 100
+                };
+                let new_symbol = new MathApp.Symbol(position, size, copied_arr[i].name);
+							}
+							let number = MathApp.blocks.length-arr.length;
+							for(let i = 0; i<arr.length; i++)
+							{
+								MathApp.blocks[number+i].head = MathApp.blocks[number].num;
+								if(i==arr.length-1)
+								{
+									MathApp.blocks[number+i].tail = null;
+								}
+								else {
+									MathApp.blocks[number+i].tail = MathApp.blocks[number+i+1].num;
+								}
+							}
+
+						}
+					MathApp.canvas.requestRenderAll();
+				}
+
+
+        //
+
+				var num=0;
+        MathApp.Symbol = function(position, size, name) {
+						num++;
+            this.type = MathApp.block_types.SYMBOL;
+						MathApp.Block.call(this, position, size);
+            this.name = name;																										//블록의 문자
+						this.num = num;																											//각 블록의 번호	(1부터 시작)
+						this.head = num;																										//그룹의 맨 앞 블록의 num
+						this.tail = null;
+            let block = this;
+
+            if (name in MathApp.symbol_paths)
+            {
+                let path = "./VisualMath/"+MathApp.symbol_paths[name] + ".jpg";
+                fabric.Image.fromURL(path, function(img) {
+                    // (0) Background
+                    let background = new fabric.Rect({
+                        left: position.x - size.width/2,
+                        top: position.y - size.height/2,
+                        width: size.width,
+                        height: size.height,
+                        fill: "rgba(255,255,255,1)",
+                        stroke: "rgba(0,0,0,0)",
+                        selectable: false
+                    });
+
+                    // (1) Image
+                    img.scaleToWidth(size.width);
+                    img.scaleToHeight(size.height);
+
+                    let img_w = img.getScaledWidth();
+                    let img_h = img.getScaledHeight();
+
+                    img.set({
+                        left: position.x - img_w/2,
+                        top: position.y - img_h/2,
+                        selectable: false
+                    });
+
+                    // (2) Boundary
+                    let boundary = new fabric.Rect({
+                        left: position.x - size.width/2,
+                        top: position.y - size.height/2,
+                        width: size.width,
+                        height: size.height,
+                        fill: "rgba(0,0,0,0)",
+                        stroke: "rgba(0,0,255,1)",
+                        strokeWidth: 5,
+                        selectable: false
+                    });
+
+                    //
+                    MathApp.canvas.add(background);
+                    MathApp.canvas.add(img);
+                    MathApp.canvas.add(boundary);
+
+                    //
+                    block.visual_items.push(background);
+                    block.visual_items.push(img);
+                    block.visual_items.push(boundary);
+                });
+            }
+        }
+
+        MathApp.Symbol.prototype = Object.create(MathApp.Block.prototype);
+
+
+        //
+        $(document).ready(function() {
+            MathApp.initialize();
+        });
+    </script>
+
+</body>
+</html>
